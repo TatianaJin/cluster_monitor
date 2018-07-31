@@ -1,6 +1,6 @@
 # Simple scripts to show cluster utilization
 
-Execute `./collectl.py -h` to see how to collect statistics from machines. You need to give a worker file like "workers".
+Execute `./collectl.py -h` to see how to collect statistics from machines. You need to give a worker file like "[workers](https://github.com/TatianaJin/cluster_monitor/blob/master/workers)".
 
 Execute `./plot.py -h` to see the help. Below are some example operations:
 1. `./plot.py collectl_raw_file -r` to plot from collectl raw file. A preprocessed files will be generated from the raw file.
