@@ -128,7 +128,7 @@ def preprocess(in_files, raw_input):
 
 
 def calculate_percent_util(data, conf):
-    data['[MEM]Used%'] = data['[MEM]Used'] / data['[MEM]Tot']
+    data['[MEM]Used%'] = data['[MEM]Used'] / (data['[MEM]Tot'] / 100)
     data['[NET]Receive%'] = data['[NET]RxKBTot'] / (conf.max_net_rx_kb / 100)
     data['[NET]Transmit%'] = data['[NET]TxKBTot'] / (conf.max_net_tx_kb / 100)
     data['[DSK]Read%'] = data['[DSK]ReadKBTot'] / (conf.max_disk_r_kb / 100)
