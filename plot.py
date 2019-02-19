@@ -35,8 +35,8 @@ class Conf:
     # default values
     def __init__(self, args = None):
         self.linewidth = 1
-        self.max_net_rx_kb = 125000.0
-        self.max_net_tx_kb = 125000.0
+        self.max_net_rx_kb = 120832.0
+        self.max_net_tx_kb = 120832.0
         self.max_disk_r_kb = 200000.0
         self.max_disk_w_kb = 200000.0
         self.mode = "util"

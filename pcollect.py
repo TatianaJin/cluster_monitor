@@ -5,8 +5,21 @@ import sys
 import json
 
 from os.path import isfile
-
 from argparse import ArgumentParser
+
+# Select pssh & pscp command
+pssh = ''
+pscp = ''
+if os.popen('which pssh').read().strip() != '':
+    pssh = 'pssh'
+    pscp = 'pscp'
+elif os.popen('which parallel-ssh').read().strip() != '':
+    pssh = 'parallel-ssh'
+    pscp = 'parallel-scp'
+else:
+    sys.stderr.write("Cannot find command pssh or parallel-ssh.\n")
+    exit(0)
+
 
 def get_parser():
     parser = ArgumentParser(description='Collectl on a set of hosts')
@@ -22,10 +35,49 @@ def get_parser():
     parser.add_argument('-i', '--interval', dest='interval', action='store', metavar='second(s)', default=1, type=float, help='collectl interval')
     return parser
 
-def clear_logs(worker_host, worker_path):
-    os.system("ssh %s '[ -e %s ] && rm -r %s'" % (worker_host, worker_path, worker_path))
-    sys.stdout.write("Cleared logs on %s.\n" % worker_host)
 
+def start_on_workers(worker_hosts, output_dir, interval):
+
+    # Check running collectl processes
+    tmp_dir = './tmp_host'
+    host_list = []
+    host_opt = '-H ' + ' -H '.join(worker_hosts)
+    check_pid_cmd = '{0} {1} -o {2} "cat collectl.pid 2> /dev/null"'.format(pssh, host_opt, tmp_dir)
+    existing_pid = os.popen(check_pid_cmd).read().strip()
+
+    for w in worker_hosts:
+        pid = open(os.path.join(tmp_dir,w)).read().strip();
+        if pid != "":
+            sys.stderr.write("Collectl already running on {0} (PID: {1})\n".format(w, pid))
+        else:
+            host_list.append(w)
+    os.system('rm {0} -r'.format(tmp_dir))
+    
+    # Launch collectl 
+    if len(host_list) is 0:
+        return
+    host_opt = '-H ' + ' -H '.join(host_list)
+    local_host_name = '\`hostname\`'
+
+    start_collectl_cmd = 'stop() {{ {5} --scc; }}; trap stop INT; {0} -P {1} -t 0 "collectl -scdmn -i {2} -f {3}/ 2>/dev/null & echo \$! > collectl.pid && echo started collectl on {4}"'.format(
+      pssh,
+      host_opt,
+      interval,
+      output_dir,
+      '\`hostname\`',
+      __file__
+    )
+
+    os.system(start_collectl_cmd)
+
+ 
+def stop_on_workers(worker_hosts, output_dir):
+    host_opt = '-H ' + ' -H '.join(worker_hosts)
+    stop_collectl_cmd = "{0} -P {1} 'pid=`cat collectl.pid 2>/dev/null` && kill $pid || echo Collectl is not running; rm -f collectl.pid' | grep -v SUCCESS | sort -V".format(pssh, host_opt)
+    os.system(stop_collectl_cmd)
+
+
+# TODO(tatiana): parallel version
 def collect_logs(worker_host, worker_path, collect_path):
     # Check if the source dir exists
     check_existing_logs_cmd = 'ssh %s "if [ -d %s ]; then echo 1; fi"' % (worker_host, worker_path)
@@ -41,36 +93,12 @@ def collect_logs(worker_host, worker_path, collect_path):
 
     sys.stdout.write("Collected logs from %s.\n" % worker_host)
 
-def start_on_worker(worker_host, worker_path, is_stop, interval = 1):
-    check_existing_collectl_cmd = 'ssh %s "cat collectl.pid 2> /dev/null"' % (worker_host)
-    existing_pid = os.popen(check_existing_collectl_cmd).read().strip()
 
-    if is_stop:
-        if existing_pid == "":
-            sys.stdout.write("Collectl is not running on %s\n" % worker_host)
-            return
+def clear_logs(worker_hosts, worker_path):
+    host_opt = '-H ' + ' -H '.join(worker_hosts)
+    os.system("{0} {1} '[ -e {2} ] && rm -r {2}'".format(pssh, host_opt, worker_path))
+    sys.stdout.write("Cleared logs on %s.\n" % worker_host)
 
-        # Stop collectl
-        os.system('ssh %s "kill %s && rm collectl.pid"' % (worker_host, existing_pid))
-
-        sys.stdout.write("Collectl on %s stopped.\n" % worker_host)
-    else:
-        # Check whether there's already a running Worker
-        if existing_pid != "":
-            sys.stdout.write("Collectl on %s already started (PID: %s)\n" % (worker_host, existing_pid))
-            return
-
-        # Create the output directory if it's not there
-        os.system('ssh %s "mkdir -p %s"' % (worker_host, worker_path))
-
-        # Start collectl
-        os.system('ssh {0} "collectl -scdmn -i {1} -f {2}/ 2>/dev/null & echo \$! > collectl.pid && wait \$!" &'.format(
-            worker_host,
-            interval,
-            worker_path
-        ))
-
-        sys.stdout.write("Collectl started on %s.\n" % worker_host)
 
 if __name__ == '__main__':
     args = get_parser().parse_args()
@@ -92,15 +120,13 @@ if __name__ == '__main__':
 
     # Start
     if args.start:
-        for worker_host in worker_hosts:
-            start_on_worker(worker_host, args.output, False, args.interval)
+        start_on_workers(worker_hosts, args.output, args.interval)
     else:
         empty = True
         # Stop
         if args.stop:
             empty = False
-            for worker_host in worker_hosts:
-                start_on_worker(worker_host, args.output, True)
+            stop_on_workers(worker_hosts, args.output)
         # Collect
         if args.collect:
             empty = False
@@ -110,7 +136,6 @@ if __name__ == '__main__':
         # Clear
         if args.clear:
             empty = False
-            for worker_host in worker_hosts:
-                clear_logs(worker_host, args.output)
+            clear_logs(worker_hosts, args.output)
         if empty:
             get_parser().print_help()
