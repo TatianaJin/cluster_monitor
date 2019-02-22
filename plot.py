@@ -153,6 +153,10 @@ class Painter:
             self.plot_conf["figsize"] = None
 
     def plot_all(self):
+        if len(self.conf.in_files) is 0:
+            return
+        with open(self.conf.in_files[0]) as cur_f:
+            self.columns = cur_f.readline().strip()[1:].split('\t')
         for in_file in self.conf.in_files:
             # load data
             data = read_csv(in_file, sep="\t", comment='#', names=self.columns)
