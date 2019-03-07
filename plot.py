@@ -2,6 +2,7 @@
 
 import json
 import os.path
+from pandas import concat
 from pandas import read_csv
 
 from numpy import arange
@@ -128,7 +129,7 @@ def preprocess(in_files, raw_input):
 
 
 def calculate_percent_util(data, conf):
-    data['[MEM]Used%'] = data['[MEM]Used'] / (data['[MEM]Tot'] / 100)
+    data['[MEM]Used%'] = (data['[MEM]Used'] - data['[MEM]Buf'] - data['[MEM]Cached']) / (data['[MEM]Tot'] / 100)
     data['[NET]Receive%'] = data['[NET]RxKBTot'] / (conf.max_net_rx_kb / 100)
     data['[NET]Transmit%'] = data['[NET]TxKBTot'] / (conf.max_net_tx_kb / 100)
     data['[DSK]Read%'] = data['[DSK]ReadKBTot'] / (conf.max_disk_r_kb / 100)
@@ -167,6 +168,23 @@ class Painter:
             output_file = os.path.join(self.conf.output, os.path.splitext(os.path.basename(in_file))[0] + '.png')
             self.plot(data[self.conf.skip_header:][self.plot_conf["columns"]], output_file)
 
+    def plot_average(self):
+        if len(self.conf.in_files) is 0:
+            return
+        with open(self.conf.in_files[0]) as cur_f:
+            self.columns = cur_f.readline().strip()[1:].split('\t')
+        data = read_csv(self.conf.in_files[0], sep="\t", comment='#', names=self.columns)
+        for in_file in self.conf.in_files[1:]:
+            # load data
+            data = concat([data,read_csv(in_file, sep="\t", comment='#', names=self.columns)])
+        data = data.groupby(level=0).mean()
+        # prepare data
+        if self.conf.mode is not "io":
+            calculate_percent_util(data, self.conf)
+        # plot
+        output_file = os.path.join(self.conf.output, 'average.png')
+        self.plot(data[self.conf.skip_header:][self.plot_conf["columns"]], output_file)
+
     def plot(self, df, output_file):
         fig, ax = plt.subplots(figsize=self.plot_conf["figsize"])
         ax.set_xlabel(self.plot_conf["xlabel"])
@@ -201,6 +219,7 @@ def main(args):
     os_sys('mkdir -p %s' % conf.output)
 
     Painter(conf).plot_all()
+    Painter(conf).plot_average()
 
 
 if __name__ == "__main__":
