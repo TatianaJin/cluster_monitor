@@ -40,6 +40,8 @@ class Conf:
         self.max_net_tx_kb = 120832.0
         self.max_disk_r_kb = 200000.0
         self.max_disk_w_kb = 200000.0
+        self.scale_cpu = 1
+        self.plot_average = 1
         self.mode = "util"
 
         # Default plot templates
@@ -60,6 +62,7 @@ class Conf:
         }
 
         self.skip_header = 0
+        self.skip_last = None
         self.interval = 1
 
         if args is not None:
@@ -118,17 +121,21 @@ class Conf:
 
 
 def preprocess(in_files, raw_input):
-    def preprocess_each(in_file, raw_input):
+    preprocessed = []
+    cmd = ""
+    for in_file in in_files:
         out_file = os.path.basename(in_file).split('.')[0]
-        os_sys("collectl -p {0} -P -oU -scdmn --sep 9 > {1}/{2}".format(in_file, raw_input, out_file))
-        print("Save preprocessed file %s to %s" % (out_file, os.path.relpath(raw_input)))
-        return os.path.join(raw_input, out_file)
+        cmd = "{3} echo 'Save preprocessed file {2} to {4}' && collectl -p {0} -P -oU -scdmn --sep 9 > {1}/{2} &".format(in_file, raw_input, out_file, cmd, os.path.relpath(raw_input))
+        preprocessed.append(os.path.join(raw_input, out_file))
 
-    os_sys("mkdir -p %s" % raw_input)
-    return [preprocess_each(in_file, raw_input) for in_file in in_files]
+    os_sys("mkdir -p {0}".format(raw_input))
+    cmd = "{0} wait".format(cmd)
+    os_sys(cmd)
+    return preprocessed
 
 
 def calculate_percent_util(data, conf):
+    data['[CPU]Totl%'] = data['[CPU]Totl%'] * conf.scale_cpu
     data['[MEM]Used%'] = (data['[MEM]Used'] - data['[MEM]Buf'] - data['[MEM]Cached']) / (data['[MEM]Tot'] / 100)
     data['[NET]Receive%'] = data['[NET]RxKBTot'] / (conf.max_net_rx_kb / 100)
     data['[NET]Transmit%'] = data['[NET]TxKBTot'] / (conf.max_net_tx_kb / 100)
@@ -166,7 +173,11 @@ class Painter:
                 calculate_percent_util(data, self.conf)
             # plot
             output_file = os.path.join(self.conf.output, os.path.splitext(os.path.basename(in_file))[0] + '.png')
-            self.plot(data[self.conf.skip_header:][self.plot_conf["columns"]], output_file)
+            last_point = len(data) if self.conf.skip_last is None else self.conf.skip_last
+            if self.conf.plot_average is not 1:
+                self.plot(data[self.conf.skip_header:last_point].groupby(arange(len(data))//self.conf.plot_average).mean()[self.plot_conf["columns"]], output_file)
+            else:
+                self.plot(data[self.conf.skip_header:last_point][self.plot_conf["columns"]], output_file)
 
     def plot_average(self):
         if len(self.conf.in_files) is 0:
@@ -183,24 +194,30 @@ class Painter:
             calculate_percent_util(data, self.conf)
         # plot
         output_file = os.path.join(self.conf.output, 'average.png')
-        self.plot(data[self.conf.skip_header:][self.plot_conf["columns"]], output_file)
+        last_point = len(data) if self.conf.skip_last is None else self.conf.skip_last
+        self.plot(data[self.conf.skip_header:last_point][self.plot_conf["columns"]], output_file)
 
     def plot(self, df, output_file):
         fig, ax = plt.subplots(figsize=self.plot_conf["figsize"])
-        ax.set_xlabel(self.plot_conf["xlabel"])
-        ax.set_ylabel(self.plot_conf["ylabel"])
+        ax.set_xlabel(self.plot_conf["xlabel"], fontsize=18)
+        ax.set_ylabel(self.plot_conf["ylabel"], fontsize=18)
         if "yticks" in self.plot_conf:
             ax.set_yticks(self.plot_conf["yticks"])
+        plt.tick_params(labelsize=16)
         if self.conf.xlim != None:
             ax.set_xlim(self.conf.xlim)
         if self.conf.ylim != None:
             ax.set_ylim(self.conf.ylim)
         if self.conf.interval is not 1:
-            df['time'] = arange(0, len(df) * self.conf.interval, 0.5)
-            df.plot(x='time', linewidth=self.conf.linewidth, ax=ax)
+            df['Time(s)'] = arange(0, round(len(df) * self.conf.interval,2), self.conf.interval)
+            df.plot(x='Time(s)', linewidth=self.conf.linewidth, ax=ax,
+                    #color=['#edf8b1', '#7fcdbb', '#2c7fb8'],
+                    color='brg',
+                    #style=['-','--','-.']
+                    )
         else:
             df.plot(linewidth=self.conf.linewidth, ax=ax)
-        lgd = plt.legend(bbox_to_anchor=(1, 1), loc=1, borderaxespad=0.1)
+        lgd = plt.legend(bbox_to_anchor=(1, 1), loc=1, borderaxespad=0.1, prop={'size': 18})
         plt.savefig(output_file, bbox_extra_artists=(lgd, ), bbox_inches='tight')
         print("Saved fig {0}".format(output_file))
         plt.close()
